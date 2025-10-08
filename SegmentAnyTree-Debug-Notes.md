@@ -8,7 +8,7 @@ load了apptainer以后勉强pull了环境。然后在一些apptainer内的小的
 我的目的是先试试这个模型效果怎么样，所以就切了一小块想用他训练好的模型试试实例分割。所以没有label也没有训练过程种产生的一些参数，这些参数都需要手动赋值
 
 
-Hydra的问题，很容易遇到一个bug
+[BUG] Hydra的问题，很容易遇到一个bug
 apptainer exec --nv \ > --bind /mnt/data/project0065/Zhimeng_Data/segmentanytree:/mnt/data/project0065/Zhimeng_Data/segmentanytree \ > /mnt/data/project0065/Zhimeng_Data/segmentanytree/sif/segment-any-tree_latest.sif \ > python3 /mnt/data/project0065/Zhimeng_Data/segmentanytree/SegmentAnyTree/eval.py \ > model_name=PointGroup-PAPER \ > ++training.checkpoint_dir=/mnt/data/project0065/Zhimeng_Data/segmentanytree/SegmentAnyTree/model_file \ > ++tracker_options.ply_output=myrun_output_fast.ply \ > ++data.fold=[/mnt/data/project0065/Zhimeng_Data/segmentanytree/output/utm2local/NS5462_test_out.ply] \ > ++training.cuda=0 \ > ++training.num_workers=4 \ > ++pretty_print=true \ > ++logging.progress_refresh_rate=10 \ > ++logging.wandb_dryrun=true /usr/local/lib/python3.8/dist-packages/wandb/__init__.py:998: SyntaxWarning: "is not" with a literal. Did you mean "!="? if name is None and resume is not "must": /usr/local/lib/python3.8/dist-packages/requests/__init__.py:102: RequestsDependencyWarning: urllib3 (1.26.7) or chardet (5.2.0)/charset_normalizer (None) doesn't match a supported version! warnings.warn("urllib3 ({}) or chardet ({})/charset_normalizer ({}) doesn't match a supported " /usr/local/lib/python3.8/dist-packages/MinkowskiEngine/__init__.py:36: UserWarning: The environment variable OMP_NUM_THREADS not set. MinkowskiEngine will automatically set OMP_NUM_THREADS=16. If you want to set OMP_NUM_THREADS manually, please export it on the command line before running a python script. e.g. export OMP_NUM_THREADS=12; python your_program.py. It is recommended to set it below 24. warnings.warn( Error executing job with overrides: ['model_name=PointGroup-PAPER', '++training.checkpoint_dir=/mnt/data/project0065/Zhimeng_Data/segmentanytree/SegmentAnyTree/model_file', '++tracker_options.ply_output=myrun_output_fast.ply', '++data.fold=[/mnt/data/project0065/Zhimeng_Data/segmentanytree/output/utm2local/NS5462_test_out.ply]', '++training.cuda=0', '++training.num_workers=4', '++pretty_print=true', '++logging.progress_refresh_rate=10', '++logging.wandb_dryrun=true'] Traceback (most recent call last): File "/mnt/data/project0065/Zhimeng_Data/segmentanytree/SegmentAnyTree/eval.py", line 31, in run main(cfg) File "/mnt/data/project0065/Zhimeng_Data/segmentanytree/SegmentAnyTree/eval.py", line 12, in main cfg.hydra.searchpath[0].replace("file://", ""), # Hydra searchpath 第一条 omegaconf.errors.ConfigAttributeError: Missing key hydra full_key: hydra object_type=dict
 
 这个我通过给hydra上绝对路径解决了
@@ -74,5 +74,63 @@ pretty_print: true
 debugging:
   profiling: false
 
+[BUG] 莫名其妙卡死在1%：
+10/1073 [00:11<17:59, 1.02s/it][DEBUG] Processing batch 11/1073 ... [DEBUG] Setting input for batch 11 [DEBUG] Forward pass start... [FWD] start [FWD] backbone in [FWD] backbone out, dt=0.065s [FWD] heads in [FWD] heads out, dt=0.003s [FWD] proposals/cluster in 1%|█████ | 10/1073 [01:41<3:00:03, 10.16s/it] Traceback (most recent call last):
+
+找到 /torch_points3d/utils/meanshift_cluster.py 中的：
+
+results = pool.map(partial_meanshift_cluster, all_clusters)
+
+
+改成：
+
+# ✅ 安全单线程执行（调试稳定）
+results = [partial_meanshift_cluster(args) for args in all_clusters]
+
+
+：eval.py 
+
+[BUG]修 YAML
+因为我是只run test，所以有一些路径需要用绝对路径绑定，YAML在代码里有好几个，主要用的是
+defaults:
+  - models: PointGroup-PAPER
+  - _self_
+
+model_name: PointGroup-PAPER
+
+data:
+  fold:
+    - /mnt/data/project0065/Zhimeng_Data/segmentanytree/output/utm2local/NS5462_test_out.ply
+
+tracker_options:
+  full_res: true
+  make_submission: true
+  ply_output: myrun_output_fast.ply
+
+training:
+  enable_cudnn: true
+  batch_size: 1
+  num_workers: 0
+  cuda: 0
+  shuffle: false
+  checkpoint_dir: /mnt/data/project0065/Zhimeng_Data/segmentanytree/SegmentAnyTree/model_file
+  weight_name: PointGroup-PAPER
+
+pretty_print: true
+debugging:
+  profiling: false
+
+
+
+
+
+
+
+好用命令：
+grep -n "def " /mnt/data/project0065/Zhimeng_Data/segmentanytree/SegmentAnyTree/torch_points3d/utils/mean_shift_euc_gpu.py | head -20
+可以grep定义的函数名称
+
+grep -n "def cluster_single" /mnt/data/project0065/Zhimeng_Data/segmentanytree/SegmentAnyTree/torch_points3d/utils/meanshift_cluster.py -A 20
+可以grep指定函数
 
 
